@@ -63,6 +63,9 @@ type Backend interface {
 
 	ChainConfig() *params.ChainConfig
 	CurrentBlock() *types.Block
+
+	// Additional APIs
+	ReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) int
 }
 
 type State interface {

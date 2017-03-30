@@ -3791,6 +3791,36 @@ var outputBlockFormatter = function(block) {
 };
 
 /**
+ * Formats the output of a block to its proper values
+ *
+ * @method outputReplayBlockFormatter
+ * @param {Object} block
+ * @returns {Object}
+*/
+var outputReplayBlockFormatter = function(block) {
+	/*
+    // transform to number
+    block.gasLimit = utils.toDecimal(block.gasLimit);
+    block.gasUsed = utils.toDecimal(block.gasUsed);
+    block.size = utils.toDecimal(block.size);
+    block.timestamp = utils.toDecimal(block.timestamp);
+    if(block.number !== null)
+        block.number = utils.toDecimal(block.number);
+
+    block.difficulty = utils.toBigNumber(block.difficulty);
+    block.totalDifficulty = utils.toBigNumber(block.totalDifficulty);
+
+    if (utils.isArray(block.transactions)) {
+        block.transactions.forEach(function(item){
+            if(!utils.isString(item))
+                return outputTransactionFormatter(item);
+        });
+    }
+	*/
+    return block;
+};
+
+/**
  * Formats the output of a log
  *
  * @method outputLogFormatter
@@ -5134,6 +5164,11 @@ var blockCall = function (args) {
     return (utils.isString(args[0]) && args[0].indexOf('0x') === 0) ? "eth_getBlockByHash" : "eth_getBlockByNumber";
 };
 
+var replayBlockCall = function (args) {
+    return (utils.isString(args[0]) && args[0].indexOf('0x') === 0) ? "eth_getBlockByHash" : "eth_getReplayBlockByNumber";
+};
+
+
 var transactionFromBlockCall = function (args) {
     return (utils.isString(args[0]) && args[0].indexOf('0x') === 0) ? 'eth_getTransactionByBlockHashAndIndex' : 'eth_getTransactionByBlockNumberAndIndex';
 };
@@ -5219,6 +5254,14 @@ var methods = function () {
         params: 2,
         inputFormatter: [formatters.inputBlockNumberFormatter, function (val) { return !!val; }],
         outputFormatter: formatters.outputBlockFormatter
+    });
+
+    var getReplayBlock = new Method({
+        name: 'getReplayBlock',
+        call: replayBlockCall,
+        params: 2,
+        inputFormatter: [formatters.inputBlockNumberFormatter, function (val) { return !!val; }],
+        outputFormatter: utils.toDecimal
     });
 
     var getUncle = new Method({
@@ -5353,6 +5396,7 @@ var methods = function () {
         getStorageAt,
         getCode,
         getBlock,
+		getReplayBlock,
         getUncle,
         getCompilers,
         getBlockTransactionCount,

@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts"
@@ -77,6 +78,47 @@ func (b *EthApiBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumb
 		return b.eth.blockchain.CurrentBlock(), nil
 	}
 	return b.eth.blockchain.GetBlockByNumber(uint64(blockNr)), nil
+}
+
+func (b *EthApiBackend) ReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) int {
+	blk := b.eth.blockchain.GetBlockByNumber(uint64(blockNr))
+	db, _ := b.eth.blockchain.State()
+	config := b.eth.blockchain.Config()
+	bc := b.eth.blockchain
+	replayBlock(blk, db, config, bc)
+	//return b.eth.blockchain.GetBlockByNumber(uint64(blockNr)), nil
+	return 123
+}
+
+// Simulate the Processor()
+func replayBlock(block *types.Block, statedb *state.StateDB, cfg *params.ChainConfig, bc *core.BlockChain) {
+	var (
+		receipts     types.Receipts
+		totalUsedGas = big.NewInt(0)
+		header       = block.Header()
+		allLogs      []*types.Log
+		gp           = new(core.GasPool).AddGas(block.GasLimit())
+	)
+
+	// Mutate the the block and state according to any hard-fork specs
+	if cfg.DAOForkSupport && cfg.DAOForkBlock != nil && cfg.DAOForkBlock.Cmp(block.Number()) == 0 {
+		core.ApplyDAOHardFork(statedb)
+	}
+	// Iterate over and process the individual transactions
+	for i, tx := range block.Transactions() {
+		//fmt.Println("tx:", i)
+		statedb.StartRecord(tx.Hash(), block.Hash(), i)
+		receipt, _, err := core.ApplyTransaction(cfg, bc, gp, statedb, header, tx, totalUsedGas, vm.Config{})
+		if err != nil {
+			//return nil, nil, nil, err
+			return
+		}
+		receipts = append(receipts, receipt)
+		allLogs = append(allLogs, receipt.Logs...)
+	}
+	core.AccumulateRewards(statedb, header, block.Uncles())
+	fmt.Printf("TEST!\n")
+	//return receipts, allLogs, totalUsedGas, err
 }
 
 func (b *EthApiBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (ethapi.State, *types.Header, error) {
