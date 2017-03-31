@@ -5261,7 +5261,7 @@ var methods = function () {
         call: replayBlockCall,
         params: 2,
         inputFormatter: [formatters.inputBlockNumberFormatter, function (val) { return !!val; }],
-        outputFormatter: utils.toDecimal
+        //outputFormatter: utils.toDecimal
     });
 
     var getUncle = new Method({

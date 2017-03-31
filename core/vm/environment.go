@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/replay"
 )
 
 type (
@@ -78,15 +79,34 @@ type EVM struct {
 	// abort is used to abort the EVM calling operations
 	// NOTE: must be set atomically
 	abort int32
+
+	// tracer is DeepInsight's data stream tracker
+	tracer replay.Tracer
 }
 
 // NewEVM retutrns a new EVM evmironment.
 func NewEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
+	a := replay.DefaultTracer{}
 	evm := &EVM{
 		Context:     ctx,
 		StateDB:     statedb,
 		vmConfig:    vmConfig,
 		chainConfig: chainConfig,
+		tracer:      &a,
+	}
+
+	evm.interpreter = NewInterpreter(evm, vmConfig)
+	return evm
+}
+
+// NewReplayEVM retutrns a new EVM evmironment.
+func NewReplayEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig, vmConfig Config, tracer replay.Tracer) *EVM {
+	evm := &EVM{
+		Context:     ctx,
+		StateDB:     statedb,
+		vmConfig:    vmConfig,
+		chainConfig: chainConfig,
+		tracer:      tracer,
 	}
 
 	evm.interpreter = NewInterpreter(evm, vmConfig)

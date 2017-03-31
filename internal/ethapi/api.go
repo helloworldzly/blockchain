@@ -458,7 +458,7 @@ func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, blockNr rpc.
 
 // GetReplayBlockByNumber returns the requested block. When blockNr is -1 the chain head is returned. When fullTx is true all
 // transactions in the block are returned in full detail, otherwise only the transaction hash is returned.
-func (s *PublicBlockChainAPI) GetReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber, fullTx bool) *big.Int {
+func (s *PublicBlockChainAPI) GetReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber, fullTx bool) string {
 	/*
 		block, err := s.b.BlockByNumber(ctx, blockNr)
 		if block != nil {
@@ -473,8 +473,9 @@ func (s *PublicBlockChainAPI) GetReplayBlockByNumber(ctx context.Context, blockN
 		}
 	*/
 
-	return big.NewInt(int64(s.b.ReplayBlockByNumber(ctx, blockNr)))
+	//return big.NewInt(int64(s.b.ReplayBlockByNumber(ctx, blockNr)))
 	//return nil, err
+	return s.b.ReplayBlockByNumber(ctx, blockNr)
 }
 
 // GetBlockByHash returns the requested block. When fullTx is true all transactions in the block are returned in full

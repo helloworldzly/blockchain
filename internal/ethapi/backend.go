@@ -65,7 +65,7 @@ type Backend interface {
 	CurrentBlock() *types.Block
 
 	// Additional APIs
-	ReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) int
+	ReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) string
 }
 
 type State interface {

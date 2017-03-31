@@ -68,8 +68,8 @@ func (b *LesApiBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumb
 	return b.GetBlock(ctx, header.Hash())
 }
 
-func (b *LesApiBackend) ReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) int {
-	return 0
+func (b *LesApiBackend) ReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber) string {
+	return ""
 }
 
 func (b *LesApiBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (ethapi.State, *types.Header, error) {
