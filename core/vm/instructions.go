@@ -255,6 +255,7 @@ func opSha3(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Sta
 	}
 
 	stack.push(common.BytesToBig(hash))
+	env.Tracer.SetMemoryInput(env.Tracer.GetSeq(), offset, size)
 	return nil, nil
 }
 
@@ -303,6 +304,7 @@ func opCalldataCopy(pc *uint64, env *EVM, contract *Contract, memory *Memory, st
 		l    = stack.pop()
 	)
 	memory.Set(mOff.Uint64(), l.Uint64(), getData(contract.Input, cOff, l))
+	env.Tracer.SetMemoryOutput(env.Tracer.GetSeq(), mOff, l, getData(contract.Input, cOff, l))
 	return nil, nil
 }
 
@@ -328,6 +330,7 @@ func opCodeCopy(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack 
 	codeCopy := getData(contract.Code, cOff, l)
 
 	memory.Set(mOff.Uint64(), l.Uint64(), codeCopy)
+	env.Tracer.SetMemoryOutput(env.Tracer.GetSeq(), mOff, l, codeCopy)
 	return nil, nil
 }
 
@@ -341,6 +344,7 @@ func opExtCodeCopy(pc *uint64, env *EVM, contract *Contract, memory *Memory, sta
 	codeCopy := getData(env.StateDB.GetCode(addr), cOff, l)
 
 	memory.Set(mOff.Uint64(), l.Uint64(), codeCopy)
+	env.Tracer.SetMemoryOutput(env.Tracer.GetSeq(), mOff, l, codeCopy)
 	return nil, nil
 }
 
@@ -402,6 +406,7 @@ func opMstore(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *S
 	// pop value of the stack
 	mStart, val := stack.pop(), stack.pop()
 	memory.Set(mStart.Uint64(), 32, common.BigToBytes(val, 256))
+	env.Tracer.SetMemory(env.Tracer.GetSeq())
 	return nil, nil
 }
 
@@ -429,6 +434,7 @@ func opJump(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Sta
 	pos := stack.pop()
 	if !contract.jumpdests.has(contract.CodeHash, contract.Code, pos) {
 		nop := contract.GetOp(pos.Uint64())
+		env.Tracer.Fail(env.Tracer.GetSeq(), fmt.Errorf("invalid jump destination (%v) %v", nop, pos), true)
 		return nil, fmt.Errorf("invalid jump destination (%v) %v", nop, pos)
 	}
 	*pc = pos.Uint64()
@@ -439,6 +445,7 @@ func opJumpi(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *St
 	if cond.Cmp(common.BigTrue) >= 0 {
 		if !contract.jumpdests.has(contract.CodeHash, contract.Code, pos) {
 			nop := contract.GetOp(pos.Uint64())
+			env.Tracer.Fail(env.Tracer.GetSeq(), fmt.Errorf("invalid jump destination (%v) %v", nop, pos), true)
 			return nil, fmt.Errorf("invalid jump destination (%v) %v", nop, pos)
 		}
 		*pc = pos.Uint64()
@@ -477,17 +484,24 @@ func opCreate(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *S
 		gas.Div(gas, n64)
 		gas = gas.Sub(contract.Gas, gas)
 	}
-
+	idx := env.Tracer.GetSeq()
+	env.Tracer.SetMemoryInput(idx, offset, size)
 	contract.UseGas(gas)
+	extraGas := gas.Int64()
 	_, addr, suberr := env.Create(contract, input, gas, value)
+	extraGas = gas.Int64() - extraGas
+	env.Tracer.AddGas(idx, extraGas)
+
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
 	// rule) and treat as an error, if the ruleset is frontier we must
 	// ignore this error and pretend the operation was successful.
 	if env.ChainConfig().IsHomestead(env.BlockNumber) && suberr == ErrCodeStoreOutOfGas {
 		stack.push(new(big.Int))
+		env.Tracer.Fail(idx, ErrOutOfGas, false)
 	} else if suberr != nil && suberr != ErrCodeStoreOutOfGas {
 		stack.push(new(big.Int))
+		env.Tracer.Fail(idx, suberr, false)
 	} else {
 		stack.push(addr.Big())
 	}
@@ -512,16 +526,30 @@ func opCall(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Sta
 	if len(value.Bytes()) > 0 {
 		gas.Add(gas, params.CallStipend)
 	}
+	idx := env.Tracer.GetSeq()
+	env.Tracer.SetMemoryInput(idx, inOffset, inSize)
+
+	if !env.StateDB.Exist(address) {
+		env.Tracer.SetCreated()
+	}
+	env.Tracer.SetInputAccount(address, env.StateDB.GetCodeHash(address),
+		env.StateDB.GetBalance(address), env.StateDB.GetNonce(address))
 
 	ret, err := env.Call(contract, address, args, gas, value)
+	env.Tracer.AddGas(idx, gas.Int64())
 
 	if err != nil {
 		stack.push(new(big.Int))
-
+		env.Tracer.Fail(idx, err, false)
+		env.Tracer.SetMemoryOutput(idx, retOffset, retSize, ret[:0])
 	} else {
 		stack.push(big.NewInt(1))
 
 		memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		env.Tracer.SetMemoryOutput(idx, retOffset, retSize, ret)
+	}
+	if env.Tracer.IsPrecompiled(address) {
+		env.Tracer.SetPrecompiledMemIO(idx)
 	}
 	return nil, nil
 }
@@ -544,16 +572,19 @@ func opCallCode(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack 
 	if len(value.Bytes()) > 0 {
 		gas.Add(gas, params.CallStipend)
 	}
-
+	idx := env.Tracer.GetSeq()
+	env.Tracer.SetMemoryInput(idx, inOffset, inSize)
 	ret, err := env.CallCode(contract, address, args, gas, value)
-
+	env.Tracer.AddGas(idx, gas.Int64())
 	if err != nil {
 		stack.push(new(big.Int))
-
+		env.Tracer.Fail(idx, err, false)
+		env.Tracer.SetMemoryOutput(idx, retOffset, retSize, ret[:0])
 	} else {
 		stack.push(big.NewInt(1))
 
 		memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+		env.Tracer.SetMemoryOutput(idx, retOffset, retSize, ret)
 	}
 	return nil, nil
 }
@@ -562,6 +593,8 @@ func opDelegateCall(pc *uint64, env *EVM, contract *Contract, memory *Memory, st
 	// if not homestead return an error. DELEGATECALL is not supported
 	// during pre-homestead.
 	if !env.ChainConfig().IsHomestead(env.BlockNumber) {
+		idx := env.Tracer.GetSeq()
+		env.Tracer.Fail(idx, fmt.Errorf("invalid opcode %x", DELEGATECALL), false)
 		return nil, fmt.Errorf("invalid opcode %x", DELEGATECALL)
 	}
 
@@ -569,12 +602,21 @@ func opDelegateCall(pc *uint64, env *EVM, contract *Contract, memory *Memory, st
 
 	toAddr := common.BigToAddress(to)
 	args := memory.Get(inOffset.Int64(), inSize.Int64())
+
+	idx := env.Tracer.GetSeq()
+	env.Tracer.SetMemoryInput(idx, inOffset, inSize)
+
 	ret, err := env.DelegateCall(contract, toAddr, args, gas)
+	env.Tracer.AddGas(idx, gas.Int64())
+
 	if err != nil {
 		stack.push(new(big.Int))
+		env.Tracer.Fail(idx, err, false)
+		env.Tracer.SetMemoryOutput(idx, outOffset, outSize, ret[:0])
 	} else {
 		stack.push(big.NewInt(1))
 		memory.Set(outOffset.Uint64(), outSize.Uint64(), ret)
+		env.Tracer.SetMemoryOutput(idx, outOffset, outSize, ret)
 	}
 	return nil, nil
 }
@@ -582,7 +624,8 @@ func opDelegateCall(pc *uint64, env *EVM, contract *Contract, memory *Memory, st
 func opReturn(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 	offset, size := stack.pop(), stack.pop()
 	ret := memory.GetPtr(offset.Int64(), size.Int64())
-
+	idx := env.Tracer.GetSeq()
+	env.Tracer.SetMemoryInput(idx, offset, size)
 	return ret, nil
 }
 
@@ -592,7 +635,18 @@ func opStop(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Sta
 
 func opSuicide(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 	balance := env.StateDB.GetBalance(contract.Address())
-	env.StateDB.AddBalance(common.BigToAddress(stack.pop()), balance)
+	env.Tracer.SetStackOutput(env.Tracer.GetSeq(), balance)
+	addr := common.BigToAddress(stack.pop())
+	if !env.StateDB.Exist(addr) {
+		env.Tracer.SetCreated()
+	}
+	env.Tracer.SetInputAccount(addr, env.StateDB.GetCodeHash(addr),
+		env.StateDB.GetBalance(addr), env.StateDB.GetNonce(addr))
+
+	env.Tracer.SetSuicidedAddress(env.Tracer.GetSeq(), contract.Address())
+	env.Tracer.AddTransfer(contract.Address().Hex(), addr.Hex(), balance, "SuicideTransfer")
+	env.Tracer.SetTransferSeq()
+	env.StateDB.AddBalance(addr, balance)
 
 	env.StateDB.Suicide(contract.Address())
 
@@ -604,6 +658,7 @@ func opSuicide(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *
 // make log instruction function
 func makeLog(size int) executionFunc {
 	return func(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
+		env.Tracer.SetStackInput(env.Tracer.GetSeq(), size+2)
 		topics := make([]common.Hash, size)
 		mStart, mSize := stack.pop(), stack.pop()
 		for i := 0; i < size; i++ {
@@ -611,6 +666,7 @@ func makeLog(size int) executionFunc {
 		}
 
 		d := memory.Get(mStart.Int64(), mSize.Int64())
+		env.Tracer.SetMemoryInput(env.Tracer.GetSeq(), mStart, mSize)
 		env.StateDB.AddLog(&types.Log{
 			Address: contract.Address(),
 			Topics:  topics,
@@ -628,6 +684,7 @@ func makePush(size uint64, bsize *big.Int) executionFunc {
 	return func(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 		byts := getData(contract.Code, new(big.Int).SetUint64(*pc+1), bsize)
 		stack.push(common.Bytes2Big(byts))
+		env.Tracer.SetStackOutput(env.Tracer.GetSeq(), common.Bytes2Big(byts))
 		*pc += size
 		return nil, nil
 	}
@@ -637,6 +694,9 @@ func makePush(size uint64, bsize *big.Int) executionFunc {
 func makeDup(size int64) executionFunc {
 	return func(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 		stack.dup(int(size))
+		idx := env.Tracer.GetSeq()
+		env.Tracer.AddStackInput(idx, int(size))
+		env.Tracer.Dup(int(size))
 		return nil, nil
 	}
 }
@@ -646,7 +706,11 @@ func makeSwap(size int64) executionFunc {
 	// switch n + 1 otherwise n would be swapped with n
 	size += 1
 	return func(pc *uint64, env *EVM, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
+		idx := env.Tracer.GetSeq()
+		env.Tracer.AddStackInput(idx, int(size))
+		env.Tracer.AddStackInput(idx, 1)
 		stack.swap(int(size))
+		env.Tracer.Swap(int(size))
 		return nil, nil
 	}
 }

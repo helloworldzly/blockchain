@@ -85,7 +85,14 @@ func (evm *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err e
 
 	if contract.CodeAddr != nil {
 		if p := PrecompiledContracts[*contract.CodeAddr]; p != nil {
-			return RunPrecompiledContract(p, input, contract)
+			//return RunPrecompiledContract(p, input, contract)
+			ret, err := RunPrecompiledContract(p, input, contract)
+			nerr := 0
+			if err != nil {
+				nerr = 1
+			}
+			evm.env.Tracer.SetPrecompiled(*contract.CodeAddr, int(p.RequiredGas(len(input)).Int64()), nerr, input, ret)
+			return ret, err
 		}
 	}
 
@@ -138,12 +145,16 @@ func (evm *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err e
 
 		// if the op is invalid abort the process and return an error
 		if !operation.valid {
+			idx := evm.env.Tracer.InitTrace(op.String(), 0, 0, evm.env.depth)
+			evm.env.Tracer.Fail(idx, fmt.Errorf("Invalid opcode %x", op), true)
 			return nil, fmt.Errorf("invalid opcode %x", op)
 		}
 
 		// validate the stack and make sure there enough stack items available
 		// to perform the operation
 		if err := operation.validateStack(stack); err != nil {
+			idx := evm.env.Tracer.InitTrace(op.String(), 0, 0, evm.env.depth)
+			evm.env.Tracer.Fail(idx, fmt.Errorf("stack underflow"), true)
 			return nil, err
 		}
 
@@ -162,19 +173,73 @@ func (evm *Interpreter) Run(contract *Contract, input []byte) (ret []byte, err e
 			// cost is explicitly set so that the capture state defer method cas get the proper cost
 			cost = operation.gasCost(evm.gasTable, evm.env, contract, stack, mem, memorySize)
 			if !contract.UseGas(cost) {
+				idx := evm.env.Tracer.InitTrace(op.String(), 0, 0, evm.env.depth)
+				evm.env.Tracer.Fail(idx, ErrOutOfGas, true)
+
 				return nil, ErrOutOfGas
 			}
 		}
+
+		idx := evm.env.Tracer.InitTrace(op.String(), int(pc), int(cost.Int64()), evm.env.depth)
+
 		if memorySize != nil {
+			if mem.Len() < int(memorySize.Int64()) {
+				evm.env.Tracer.AddMemSize(idx, mem.Len(), int(memorySize.Int64()))
+			}
 			mem.Resize(memorySize.Uint64())
+			evm.env.Tracer.ResizeMemory(int(memorySize.Int64()))
 		}
 
 		if evm.cfg.Debug {
 			evm.cfg.Tracer.CaptureState(evm.env, pc, op, contract.Gas, cost, mem, stack, contract, evm.env.depth, err)
 		}
 
+		switch op.String() {
+		case "ISZERO", "NOT", "BALANCE", "CALLDATALOAD", "EXTCODESIZE", "BLOCKHASH", "POP", "MLOAD", "SLOAD":
+			fallthrough
+		case "JUMP", "SUICIDE":
+			evm.env.Tracer.SetStackInput(idx, 1)
+		case "ADD", "SUB", "MUL", "DIV", "SDIV", "MOD", "SMOD", "EXP", "SIGNEXTEND":
+			fallthrough
+		case "LT", "GT", "SLT", "SGT", "EQ", "AND", "OR", "XOR", "BYTE":
+			fallthrough
+		case "SHA3":
+			fallthrough
+		case "JUMPI", "RETURN":
+			fallthrough
+		case "MSTORE", "MSTORE8", "SSTORE":
+			evm.env.Tracer.SetStackInput(idx, 2)
+		case "ADDMOD", "MULMOD", "CALLDATACOPY", "CODECOPY", "CREATE":
+			evm.env.Tracer.SetStackInput(idx, 3)
+		case "EXTCODECOPY":
+			evm.env.Tracer.SetStackInput(idx, 4)
+		case "DELEGATECALL":
+			evm.env.Tracer.SetStackInput(idx, 6)
+		case "CALL", "CALLCODE":
+			evm.env.Tracer.SetStackInput(idx, 7)
+		default:
+		}
 		// execute the operation
 		res, err := operation.execute(&pc, evm.env, contract, mem, stack)
+		switch op.String() {
+		case "ADD", "SUB", "MUL", "DIV", "SDIV", "MOD", "SMOD", "ADDMOD", "MULMOD", "EXP", "SIGNEXTEND":
+			fallthrough
+		case "LT", "GT", "SLT", "SGT", "EQ", "ISZERO", "AND", "OR", "XOR", "NOT", "BYTE":
+			fallthrough
+		case "SHA3":
+			fallthrough
+		case "ADDRESS", "BALANCE", "ORIGIN", "CALLER", "CALLVALUE", "CALLDATALOAD", "CALLDATASIZE", "CODESIZE", "GASPRICE", "EXTCODESIZE":
+			fallthrough
+		case "BLOCKHASH", "COINBASE", "TIMESTAMP", "NUMBER", "DIFFICULTY", "GASLIMIT":
+			fallthrough
+		case "MLOAD", "SLOAD", "MSIZE", "GAS":
+			fallthrough
+		case "CREATE", "CALL", "CALLCODE", "DELEGATECALL":
+			fallthrough
+		case "PC":
+			evm.env.Tracer.SetStackOutput(idx, stack.peek())
+		default:
+		}
 		switch {
 		case err != nil:
 			return nil, err

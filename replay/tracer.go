@@ -13,7 +13,7 @@ type Tracer interface {
 	TxInit(seq int)
 
 	// Transfer
-	AddTransfer(from common.Address, to common.Address, balance *big.Int, reason string)
+	AddTransfer(from string, to string, balance *big.Int, reason string)
 	SetTransferSeq()
 	ValidateTransfer(seq int)
 
@@ -79,7 +79,7 @@ type Tracer interface {
 	GetSeq() int
 	InitTrace(name string, pc int, gas int, calldepth int) int
 	AddMemSize(seq int, before, after int)
-	AddGas(seq int, gas *big.Int)
+	AddGas(seq int, gas int64)
 	SetStackInput(seq int, num int)
 	SetStackOutput(seq int, val *big.Int)
 	SetMemoryInput(seq int, offset *big.Int, size *big.Int)

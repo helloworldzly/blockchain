@@ -34,7 +34,7 @@ func replayBlock(block *types.Block, statedb *state.StateDB, cfg *params.ChainCo
 	blkString += fmt.Sprintf("{\"transactionList\":[")
 
 	setInputStates(block, statedb)
-
+	fmt.Printf("TESTTEST\n")
 	// Mutate the the block and state according to any hard-fork specs
 	if cfg.DAOForkSupport && cfg.DAOForkBlock != nil && cfg.DAOForkBlock.Cmp(block.Number()) == 0 {
 		addDaoForkBeforeState(statedb)
@@ -89,7 +89,7 @@ func replayBlock(block *types.Block, statedb *state.StateDB, cfg *params.ChainCo
 		tracer.ValidateTransfer(i)
 	}
 
-	core.AccumulateRewards(statedb, header, block.Uncles())
+	AccumulateRewards(statedb, header, block.Uncles(), &tracer)
 
 	setOutputStates(block, statedb)
 
@@ -97,6 +97,37 @@ func replayBlock(block *types.Block, statedb *state.StateDB, cfg *params.ChainCo
 	blkString += blkToJSON(block, statedb, &tracer, bc)
 
 	return blkString
+}
+
+// AccumulateRewards credits the coinbase of the given block with the
+// mining reward. The total reward consists of the static block reward
+// and rewards for included uncles. The coinbase of each uncle block is
+// also rewarded.
+func AccumulateRewards(statedb *state.StateDB, header *types.Header, uncles []*types.Header, tracer replay.Tracer) {
+	big8 := big.NewInt(8)
+	big32 := big.NewInt(32)
+
+	reward := new(big.Int).Set(core.BlockReward)
+	r := new(big.Int)
+	for _, uncle := range uncles {
+		r.Add(uncle.Number, big8)
+		r.Sub(r, header.Number)
+		r.Mul(r, core.BlockReward)
+		r.Div(r, big8)
+		if !statedb.Exist(uncle.Coinbase) {
+			tracer.AddBlockCreatedAccount(uncle.Coinbase)
+		}
+		statedb.AddBalance(uncle.Coinbase, r)
+		tracer.AddTransfer("NIL", uncle.Coinbase.Hex(), r, "UncleReward")
+		r.Div(core.BlockReward, big32)
+		reward.Add(reward, r)
+	}
+	if !statedb.Exist(header.Coinbase) {
+		tracer.AddBlockCreatedAccount(header.Coinbase)
+	}
+	statedb.AddBalance(header.Coinbase, reward)
+	tracer.AddTransfer("NIL", header.Coinbase.Hex(), reward, "MinerReward")
+
 }
 
 // replayApplyTransaction is a modified version of ApplyTransaction in core package
@@ -165,7 +196,7 @@ func ApplyDAOHardFork(statedb *state.StateDB, tracer replay.Tracer) {
 	// Move every DAO account and extra-balance account funds into the refund contract
 	for _, addr := range params.DAODrainList {
 		if account := statedb.GetStateObject(addr); account != nil {
-			tracer.AddTransfer(account.Address(), refund.Address(), account.Balance(), "DAOForkTransfer")
+			tracer.AddTransfer(account.Address().Hex(), refund.Address().Hex(), account.Balance(), "DAOForkTransfer")
 			refund.AddBalance(account.Balance())
 			account.SetBalance(new(big.Int))
 		}

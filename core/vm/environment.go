@@ -80,8 +80,8 @@ type EVM struct {
 	// NOTE: must be set atomically
 	abort int32
 
-	// tracer is DeepInsight's data stream tracker
-	tracer replay.Tracer
+	// Tracer is DeepInsight's data stream tracker
+	Tracer replay.Tracer
 }
 
 // NewEVM retutrns a new EVM evmironment.
@@ -92,7 +92,7 @@ func NewEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig, vmCon
 		StateDB:     statedb,
 		vmConfig:    vmConfig,
 		chainConfig: chainConfig,
-		tracer:      &a,
+		Tracer:      &a,
 	}
 
 	evm.interpreter = NewInterpreter(evm, vmConfig)
@@ -106,7 +106,7 @@ func NewReplayEVM(ctx Context, statedb StateDB, chainConfig *params.ChainConfig,
 		StateDB:     statedb,
 		vmConfig:    vmConfig,
 		chainConfig: chainConfig,
-		tracer:      tracer,
+		Tracer:      tracer,
 	}
 
 	evm.interpreter = NewInterpreter(evm, vmConfig)
@@ -157,23 +157,31 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas,
 		to = evm.StateDB.GetAccount(addr)
 	}
 	evm.Transfer(evm.StateDB, caller.Address(), to.Address(), value)
+	evm.Tracer.AddTransfer(caller.Address().Hex(), to.Address().Hex(), value, "CallTransfer")
+	evm.Tracer.SetTransferSeq()
 
 	// initialise a new contract and set the code that is to be used by the
 	// E The contract is a scoped evmironment for this execution context
 	// only.
 	contract := NewContract(caller, to, value, gas)
 	contract.SetCallCode(&addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetCode(addr))
+	evm.Tracer.AddCode(addr, evm.StateDB.GetCode(addr))
 	defer contract.Finalise()
 
+	evm.Tracer.EnterEnv(contract.Address())
 	ret, err = evm.interpreter.Run(contract, input)
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in homestead this also counts for code storage gas errors.
 	if err != nil {
 		contract.UseGas(contract.Gas)
-
+		if evm.Tracer.GetDepth() == 0 {
+			evm.Tracer.FailTx(err)
+		}
 		evm.StateDB.RevertToSnapshot(snapshot)
+		evm.Tracer.RevertStore()
 	}
+	evm.Tracer.ExitEnv()
 	return ret, err
 }
 
@@ -206,20 +214,27 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		snapshot = evm.StateDB.Snapshot()
 		to       = evm.StateDB.GetAccount(caller.Address())
 	)
+
+	evm.Tracer.SetInputAccount(addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetBalance(addr), evm.StateDB.GetNonce(addr))
+
 	// initialise a new contract and set the code that is to be used by the
 	// E The contract is a scoped evmironment for this execution context
 	// only.
 	contract := NewContract(caller, to, value, gas)
 	contract.SetCallCode(&addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetCode(addr))
+	evm.Tracer.AddCode(addr, evm.StateDB.GetCode(addr))
 	defer contract.Finalise()
 
+	evm.Tracer.EnterEnv(contract.Address())
 	ret, err = evm.interpreter.Run(contract, input)
 	if err != nil {
 		contract.UseGas(contract.Gas)
 
 		evm.StateDB.RevertToSnapshot(snapshot)
+		evm.Tracer.RevertStore()
 	}
 
+	evm.Tracer.ExitEnv()
 	return ret, err
 }
 
@@ -247,18 +262,24 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		to       = evm.StateDB.GetAccount(caller.Address())
 	)
 
+	evm.Tracer.SetInputAccount(addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetBalance(addr), evm.StateDB.GetNonce(addr))
+
 	// Iinitialise a new contract and make initialise the delegate values
 	contract := NewContract(caller, to, caller.Value(), gas).AsDelegate()
 	contract.SetCallCode(&addr, evm.StateDB.GetCodeHash(addr), evm.StateDB.GetCode(addr))
+	evm.Tracer.AddCode(addr, evm.StateDB.GetCode(addr))
 	defer contract.Finalise()
 
+	evm.Tracer.EnterEnv(contract.Address())
 	ret, err = evm.interpreter.Run(contract, input)
 	if err != nil {
 		contract.UseGas(contract.Gas)
 
 		evm.StateDB.RevertToSnapshot(snapshot)
+		evm.Tracer.RevertStore()
 	}
 
+	evm.Tracer.ExitEnv()
 	return ret, err
 }
 
@@ -289,11 +310,16 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas, value *big.Int) (re
 
 	snapshot := evm.StateDB.Snapshot()
 	contractAddr = crypto.CreateAddress(caller.Address(), nonce)
+	evm.Tracer.SetInputAccount(contractAddr, evm.StateDB.GetCodeHash(contractAddr),
+		evm.StateDB.GetBalance(contractAddr), evm.StateDB.GetNonce(contractAddr))
+
 	to := evm.StateDB.CreateAccount(contractAddr)
 	if evm.ChainConfig().IsEIP158(evm.BlockNumber) {
 		evm.StateDB.SetNonce(contractAddr, 1)
 	}
 	evm.Transfer(evm.StateDB, caller.Address(), to.Address(), value)
+	evm.Tracer.AddTransfer(caller.Address().Hex(), to.Address().Hex(), value, "CallTransfer")
+	evm.Tracer.SetTransferSeq()
 
 	// initialise a new contract and set the code that is to be used by the
 	// E The contract is a scoped evmironment for this execution context
@@ -301,6 +327,10 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas, value *big.Int) (re
 	contract := NewContract(caller, to, value, gas)
 	contract.SetCallCode(&contractAddr, crypto.Keccak256Hash(code), code)
 	defer contract.Finalise()
+
+	evm.Tracer.EnterEnv(contract.Address())
+
+	idx := evm.Tracer.GetSeq()
 
 	ret, err = evm.interpreter.Run(contract, nil)
 
@@ -315,6 +345,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas, value *big.Int) (re
 		dataGas.Mul(dataGas, params.CreateDataGas)
 		if contract.UseGas(dataGas) {
 			evm.StateDB.SetCode(contractAddr, ret)
+			evm.Tracer.AddCode(contractAddr, ret)
 		} else {
 			err = ErrCodeStoreOutOfGas
 		}
@@ -326,8 +357,25 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas, value *big.Int) (re
 	if maxCodeSizeExceeded ||
 		(err != nil && (evm.ChainConfig().IsHomestead(evm.BlockNumber) || err != ErrCodeStoreOutOfGas)) {
 		contract.UseGas(contract.Gas)
-		evm.StateDB.RevertToSnapshot(snapshot)
 
+		// In this situation, even if init code finished with no error, but we still mark them as failed.
+		if maxCodeSizeExceeded {
+			// Also set the opCreate to be unfinished...
+			evm.Tracer.FailCreate(idx, fmt.Errorf("MaxCodeSizeExceeded"))
+		} else {
+			evm.Tracer.FailCreate(idx+1, err)
+		}
+
+		evm.StateDB.RevertToSnapshot(snapshot)
+		evm.Tracer.RevertStore()
+		if evm.Tracer.GetDepth() == 0 {
+			if maxCodeSizeExceeded {
+				evm.Tracer.FailTx(fmt.Errorf("MaxCodeSizeExceeded"))
+			} else {
+				evm.Tracer.FailTx(err)
+			}
+		}
+		evm.Tracer.ExitEnv()
 		// Nothing should be returned when an error is thrown.
 		return nil, contractAddr, err
 	}
@@ -337,7 +385,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas, value *big.Int) (re
 	if err != nil {
 		ret = nil
 	}
-
+	evm.Tracer.ExitEnv()
 	return ret, contractAddr, err
 }
 

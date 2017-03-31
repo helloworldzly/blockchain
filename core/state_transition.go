@@ -184,6 +184,7 @@ func (self *StateTransition) buyGas() error {
 	self.addGas(mgas)
 	self.initialGas.Set(mgas)
 	sender.SubBalance(mgval)
+	self.env.Tracer.AddTransfer(sender.Address().Hex(), "NIL", mgval, "PrePay")
 	return nil
 }
 
@@ -252,6 +253,7 @@ func (self *StateTransition) TransitionDb() (ret []byte, requiredGas, usedGas *b
 
 	self.refundGas()
 	self.state.AddBalance(self.env.Coinbase, new(big.Int).Mul(self.gasUsed(), self.gasPrice))
+	vmenv.Tracer.AddTransfer("NIL", vmenv.Coinbase.Hex(), new(big.Int).Mul(self.gasUsed(), self.gasPrice), "TransactionFee")
 
 	return ret, requiredGas, self.gasUsed(), err
 }
@@ -262,12 +264,14 @@ func (self *StateTransition) refundGas() {
 	sender := self.from() // err already checked
 	remaining := new(big.Int).Mul(self.gas, self.gasPrice)
 	sender.AddBalance(remaining)
-
+	self.env.Tracer.AddTransfer("NIL", sender.Address().Hex(), remaining, "RegularRefund")
 	// Apply refund counter, capped to half of the used gas.
 	uhalf := remaining.Div(self.gasUsed(), common.Big2)
 	refund := common.BigMin(uhalf, self.state.GetRefund())
 	self.gas.Add(self.gas, refund)
 	self.state.AddBalance(sender.Address(), refund.Mul(refund, self.gasPrice))
+	self.env.Tracer.AddTransfer("NIL", sender.Address().Hex(), refund, "ReleaseRefund")
+	self.env.Tracer.SetRefundGas(self.state.GetRefund())
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.

@@ -84,7 +84,7 @@ func (b *EthApiBackend) ReplayBlockByNumber(ctx context.Context, blockNr rpc.Blo
 	prvBlk := b.eth.blockchain.GetBlockByNumber(uint64(blockNr) - 1)
 	config := b.eth.blockchain.Config()
 	bc := b.eth.blockchain
-	db, _ := bc.StateAt(prvBlk.Hash())
+	db, _ := bc.StateAt(prvBlk.Root())
 	return replayBlock(blk, db, config, bc)
 	//return b.eth.blockchain.GetBlockByNumber(uint64(blockNr)), nil
 

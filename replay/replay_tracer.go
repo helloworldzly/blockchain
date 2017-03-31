@@ -97,10 +97,10 @@ func (r *ReplayTracer) TxInit(seq int) {
 }
 
 // Transfer
-func (r *ReplayTracer) AddTransfer(from common.Address, to common.Address, balance *big.Int, reason string) {
+func (r *ReplayTracer) AddTransfer(from string, to string, balance *big.Int, reason string) {
 	obj := Trans{
-		From:  from.Hex(),
-		To:    to.Hex(),
+		From:  from,
+		To:    to,
 		Value: balance.String(),
 		Type:  reason,
 		TxID:  r.TxID,
@@ -185,8 +185,8 @@ func (r *ReplayTracer) IsCreated(addr common.Address) bool {
 
 // Code Management
 func (r *ReplayTracer) AddCode(addr common.Address, code []byte) {
-	if string(code) != "" && string(code) != "0x" {
-		r.codeStore[addr.Hex()] = string(code)
+	if common.Bytes2Hex(code) != "" && common.Bytes2Hex(code) != "0x" {
+		r.codeStore[addr.Hex()] = "0x" + common.Bytes2Hex(code)
 	}
 }
 
@@ -643,8 +643,8 @@ func (r *ReplayTracer) AddMemSize(seq int, before, after int) {
 	r.traceLog[seq].Basic.AfterMemSize = after
 }
 
-func (r *ReplayTracer) AddGas(seq int, gas *big.Int) {
-	r.refundGas = int(gas.Int64())
+func (r *ReplayTracer) AddGas(seq int, gas int64) {
+	r.refundGas = int(gas)
 }
 
 func (r *ReplayTracer) SetStackInput(seq int, num int) {

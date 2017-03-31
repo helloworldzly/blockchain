@@ -13,7 +13,7 @@ func (r *DefaultTracer) BlockInit()     {}
 func (r *DefaultTracer) TxInit(seq int) {}
 
 // Transfer
-func (r *DefaultTracer) AddTransfer(from common.Address, to common.Address, balance *big.Int, reason string) {
+func (r *DefaultTracer) AddTransfer(from string, to string, balance *big.Int, reason string) {
 }
 func (r *DefaultTracer) SetTransferSeq()          {}
 func (r *DefaultTracer) ValidateTransfer(seq int) {}
@@ -130,7 +130,7 @@ func (r *DefaultTracer) InitTrace(name string, pc int, gas int, calldepth int) i
 	return 0
 }
 func (r *DefaultTracer) AddMemSize(seq int, before, after int)                               {}
-func (r *DefaultTracer) AddGas(seq int, gas *big.Int)                                        {}
+func (r *DefaultTracer) AddGas(seq int, gas int64)                                           {}
 func (r *DefaultTracer) SetStackInput(seq int, num int)                                      {}
 func (r *DefaultTracer) SetStackOutput(seq int, val *big.Int)                                {}
 func (r *DefaultTracer) SetMemoryInput(seq int, offset *big.Int, size *big.Int)              {}
