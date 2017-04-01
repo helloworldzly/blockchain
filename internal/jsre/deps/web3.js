@@ -5264,6 +5264,14 @@ var methods = function () {
         //outputFormatter: utils.toDecimal
     });
 
+    var saveReplayBlock = new Method({
+        name: 'saveReplayBlock',
+        call: 'eth_saveReplayBlock',
+        params: 2,
+        //inputFormatter: [formatters.inputBlockNumberFormatter, function (val) { return !!val; }],
+        //outputFormatter: utils.toDecimal
+    });
+
     var getUncle = new Method({
         name: 'getUncle',
         call: uncleCall,
@@ -5397,6 +5405,7 @@ var methods = function () {
         getCode,
         getBlock,
 		getReplayBlock,
+		saveReplayBlock,
         getUncle,
         getCompilers,
         getBlockTransactionCount,

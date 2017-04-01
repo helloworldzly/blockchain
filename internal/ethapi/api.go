@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"strings"
 	"time"
 
@@ -459,23 +460,17 @@ func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, blockNr rpc.
 // GetReplayBlockByNumber returns the requested block. When blockNr is -1 the chain head is returned. When fullTx is true all
 // transactions in the block are returned in full detail, otherwise only the transaction hash is returned.
 func (s *PublicBlockChainAPI) GetReplayBlockByNumber(ctx context.Context, blockNr rpc.BlockNumber, fullTx bool) string {
-	/*
-		block, err := s.b.BlockByNumber(ctx, blockNr)
-		if block != nil {
-			response, err := s.rpcOutputBlock(block, true, fullTx)
-			if err == nil && blockNr == rpc.PendingBlockNumber {
-				// Pending blocks need to nil out a few fields
-				for _, field := range []string{"hash", "nonce", "logsBloom", "miner"} {
-					response[field] = nil
-				}
-			}
-			return response, err
-		}
-	*/
-
-	//return big.NewInt(int64(s.b.ReplayBlockByNumber(ctx, blockNr)))
-	//return nil, err
 	return s.b.ReplayBlockByNumber(ctx, blockNr)
+}
+
+// SaveReplayBlock returns the requested block. When blockNr is -1 the chain head is returned. When fullTx is true all
+// transactions in the block are returned in full detail, otherwise only the transaction hash is returned.
+func (s *PublicBlockChainAPI) SaveReplayBlock(ctx context.Context, blockNr rpc.BlockNumber, fileName string) string {
+	ans := s.b.ReplayBlockByNumber(ctx, blockNr)
+	fp, _ := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0666)
+	defer fp.Close()
+	fp.WriteString(ans)
+	return ans
 }
 
 // GetBlockByHash returns the requested block. When fullTx is true all transactions in the block are returned in full

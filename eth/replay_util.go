@@ -30,11 +30,8 @@ func replayBlock(block *types.Block, statedb *state.StateDB, cfg *params.ChainCo
 	// Init block level data
 	blockInit()
 	tracer.BlockInit()
-
 	blkString += fmt.Sprintf("{\"transactionList\":[")
-
 	setInputStates(block, statedb)
-	fmt.Printf("TESTTEST\n")
 	// Mutate the the block and state according to any hard-fork specs
 	if cfg.DAOForkSupport && cfg.DAOForkBlock != nil && cfg.DAOForkBlock.Cmp(block.Number()) == 0 {
 		addDaoForkBeforeState(statedb)
